@@ -1,0 +1,945 @@
+---
+title: "Order Flow Analysis in Crypto Markets"
+format: pdf
+editor: visual
+---
+
+```{r}
+library(lubridate)
+library(dplyr)
+library(zoo)
+library(ggplot2)
+library(tseries)
+library(tidyr)
+library(patchwork)
+library(knitr)
+library(urca)
+library(scales)
+
+```
+
+## Data
+
+```{r}
+trade <- read.csv("XBTUSD_trade_data_oct.csv")
+quote<- read.csv("XBTUSD_quote_data_oct.csv")
+```
+
+4.1m observations, 4 variables for Trade data. 8.57 m obs and 5 variables for Quote data.
+
+```{r}
+#| echo: false
+quote$timestamp <- as.POSIXct(sub("D", " ", quote$timestamp), format="%Y-%m-%d %H:%M:%OS", tz="UTC")
+options(digits.secs = 6) #  just helps you see the precision — it's  just for display but the doesnt chnage how the data is stored but anyways internally the microseconds are there 
+head(quote$timestamp)
+trade$timestamp <- as.POSIXct(sub("D", " ", trade$timestamp), format="%Y-%m-%d %H:%M:%OS", tz="UTC")
+options(digits.secs = 6) 
+head(trade$timestamp)
+
+```
+
+## Stats results
+
+### quote midprice and change in midprice computation
+
+```{r}
+ticksize<- 0.1
+quote$MP<- (quote$bidPrice+quote$askPrice)/2
+quote$dMP<-((quote$MP - lag(quote$MP)) / ticksize)
+quote$dMP_dollars <- (quote$MP - lag(quote$MP))
+```
+
+### Oct 15 quote data filter
+
+```{r}
+quote_15<- quote|> filter(as.Date(timestamp)==as.Date("2017-10-15"))
+```
+
+When we filter for Oct 15 we end up with 410817 observations of 8 variables
+
+### price stationarity tests
+
+#### Rolling volatility
+
+```{r}
+quote_15$volatility <- rollapply(
+  quote_15$dMP, width = 1000, FUN = sd, fill = NA, align = "right"
+)
+quote_15$volatility_dollars <- rollapply(
+  quote_15$dMP_dollars, width = 1000, FUN = sd, fill = NA, align = "right"
+)
+
+```
+
+for every 1000 consecutive ticks, it calculates the standard deviation, which measures how much the price changes fluctuate within that window.
+
+#### price plots without division by ticksize (gives correct output though)
+
+```{r}
+p1 <- ggplot(quote_15, aes(x = timestamp, y = MP, color = "MidPrice")) +
+  geom_line() +
+  labs(x = "", y = "", color = "") +
+  scale_color_manual(values = c("MidPrice" = "steelblue")) +
+  theme_minimal() +
+  theme(
+    legend.position = c(0.98, 0.95),
+    legend.justification = c("right", "top"),
+    legend.key.size = unit(0.4, "lines"),
+    legend.text = element_text(size = 7)
+  )
+
+p2_dollars <- ggplot(quote_15, aes(x = timestamp, y = dMP_dollars, color = "ΔMP")) +
+  geom_line() +
+  labs(x = "", y = "", color = "") +
+  scale_color_manual(values = c("ΔMP" = "darkred")) +
+  theme_minimal() +
+  theme(
+    legend.position = c(0.98, 0.95),
+    legend.justification = c("right", "top"),
+    legend.key.size = unit(0.4, "lines"),
+    legend.text = element_text(size = 7)
+  )
+
+
+p3_dollars <- ggplot(quote_15, aes(x = timestamp, y = volatility_dollars, color = "Volatility")) +
+  geom_line() +
+  labs(x = "Time", y = "", color = "") +
+  scale_color_manual(values = c("Volatility" = "darkgreen")) +
+  theme_minimal() +
+  theme(
+    legend.position = c(0.98, 0.95),
+    legend.justification = c("right", "top"),
+    legend.key.size = unit(0.4, "lines"),
+    legend.text = element_text(size = 7)
+  )
+
+#(p1 / p2_dollars / p3_dollars) + plot_layout(heights = c(2, 1.5, 1.5))
+ggsave("stackedpriceplots.png", p1 / p2_dollars / p3_dollars, width = 8, height = 6)
+```
+
+#### price plots with ticksize division
+
+```{r}
+p1 <- ggplot(quote_15, aes(x = timestamp, y = MP, color = "MidPrice")) +
+  geom_line() +
+  labs(x = "", y = "", color = "") +
+  scale_color_manual(values = c("MidPrice" = "steelblue")) +
+  theme_minimal() +
+  theme(
+    legend.position = c(0.98, 0.95),
+    legend.justification = c("right", "top"),
+    legend.key.size = unit(0.4, "lines"),
+    legend.text = element_text(size = 7)
+  )
+
+p2_tick <- ggplot(quote_15, aes(x = timestamp, y = dMP, color = "ΔMP")) +
+  geom_line() +
+  labs(x = "", y = "", color = "") +
+  scale_color_manual(values = c("ΔMP" = "darkred")) +
+  theme_minimal() +
+  theme(
+    legend.position = c(0.98, 0.95),
+    legend.justification = c("right", "top"),
+    legend.key.size = unit(0.4, "lines"),
+    legend.text = element_text(size = 7)
+  )
+
+
+p3_tick <- ggplot(quote_15, aes(x = timestamp, y = volatility, color = "Volatility")) +
+  geom_line() +
+  labs(x = "Time", y = "", color = "") +
+  scale_color_manual(values = c("Volatility" = "darkgreen")) +
+  theme_minimal() +
+  theme(
+    legend.position = c(0.98, 0.95),
+    legend.justification = c("right", "top"),
+    legend.key.size = unit(0.4, "lines"),
+    legend.text = element_text(size = 7)
+  )
+
+#(p1 / p2_dollars / p3_dollars) + plot_layout(heights = c(2, 1.5, 1.5))
+ggsave("stackedpriceplots_tick.png", p1 / p2_tick / p3_tick, width = 8, height = 6)
+```
+
+Fig 1 was basically to give a full picture of the price behaviour of crypto; overall trends, non-stationarity from the 1st plot of the midprice; stationarity and short term movements from the 2nd plot of differenced midprice; 3rd plot with the rolling volaitlity showing how extreme the movements in price changes are over a short period (1000 ticks)
+
+#### stationarity test for the differenced price series (all ks)
+
+```{r}
+
+intervals <- c("1 second", "10 seconds", "1 minute", "5 minutes", "10 minutes", "1 hour")
+
+# Function to test stationarity across multiple intervals
+test_stationarity_all <- function(data, intervals) {
+  results <- data.frame(
+    interval = character(),
+    adf_statistic = numeric(),
+    adf_p_value = numeric(),
+    kpss_statistic = numeric(),
+    kpss_p_value = numeric(),
+    stringsAsFactors = FALSE
+  )
+  
+  for (intv in intervals) {
+    # Resample by interval
+    data_resampled <- data |>
+      filter(!is.na(dMP)) |>
+      mutate(time_bin = floor_date(timestamp, unit = intv)) |>
+      group_by(time_bin)|>
+      summarise(dMP_sum = sum(dMP), .groups = "drop")
+    
+    dMP_vec <- data_resampled$dMP_sum
+    
+    # Run tests
+    adf_res <- adf.test(dMP_vec)
+    kpss_res <- kpss.test(dMP_vec, null = "Level")
+    
+    # Store results
+    results <- rbind(results, data.frame(
+      interval = intv,
+      adf_statistic = adf_res$statistic,
+      adf_p_value = adf_res$p.value,
+      kpss_statistic = kpss_res$statistic,
+      kpss_p_value = kpss_res$p.value
+    ))
+  }
+  
+  return(results)
+}
+stationarity_results <- test_stationarity_all(quote, intervals)
+stationarity_results
+
+```
+
+### Table 1 rep (description stats )
+
+```{r}
+start_time <- floor_date(min(quote$timestamp), "1 second")
+end_time   <- floor_date(max(quote$timestamp), "1 second")
+all_seconds <- tibble(second = seq(start_time, end_time, by = "1 sec"))
+
+# count arrivals per second (including 0s)
+quotes_1s <- quote |>
+  mutate(second = floor_date(timestamp, "1 second")) |>
+  group_by(second)|>
+  summarise(arrival_rate = n(), .groups = "drop") |>
+  right_join(all_seconds, by = "second") |>
+  replace_na(list(arrival_rate = 0))
+
+desc_stats <- quotes_1s|>
+  summarise(
+    Mean  = mean(arrival_rate, na.rm = TRUE),
+    SD    = sd(arrival_rate, na.rm = TRUE),
+    Min   = min(arrival_rate, na.rm = TRUE),
+    `25%` = quantile(arrival_rate, 0.25, na.rm = TRUE),
+    `50%` = median(arrival_rate, na.rm = TRUE),
+    `75%` = quantile(arrival_rate, 0.75, na.rm = TRUE),
+    Max   = max(arrival_rate, na.rm = TRUE)
+  ) |>
+  t() |> as.data.frame()  
+
+colnames(desc_stats) <- c("XBTUSD")  
+desc_stats <- tibble::rownames_to_column(desc_stats, "Statistic")
+
+```
+
+#### Arrival rates (10 sec )
+
+```{r}
+start_time_10s<- floor_date(min(quote$timestamp), "10 second")
+end_time_10s   <- floor_date(max(quote$timestamp), "10 second")
+all_seconds_10s <- tibble(second = seq(start_time_10s, end_time_10s, by = "10 sec"))
+
+# count arrivals per second (including 0s)
+quotes_10s <- quote |>
+  mutate(second = floor_date(timestamp, "10 second")) |>
+  group_by(second)|>
+  summarise(arrival_rate_10s = n(), .groups = "drop") |>
+  right_join(all_seconds_10s, by = "second") |>
+  replace_na(list(arrival_rate_10s = 0))
+
+desc_stats_10s <- quotes_10s|>
+  summarise(
+    Mean  = mean(arrival_rate_10s, na.rm = TRUE),
+    SD    = sd(arrival_rate_10s, na.rm = TRUE),
+    Min   = min(arrival_rate_10s, na.rm = TRUE),
+    `25%` = quantile(arrival_rate_10s, 0.25, na.rm = TRUE),
+    `50%` = median(arrival_rate_10s, na.rm = TRUE),
+    `75%` = quantile(arrival_rate_10s, 0.75, na.rm = TRUE),
+    Max   = max(arrival_rate_10s, na.rm = TRUE)
+  ) |>
+  t() |> as.data.frame()  
+
+colnames(desc_stats_10s) <- c("XBTUSD")  
+desc_stats_10s <- tibble::rownames_to_column(desc_stats_10s, "Statistic")
+
+```
+
+#### Arrival rate 1 min
+
+```{r}
+start_time_1m<- floor_date(min(quote$timestamp), "1 minute")
+end_time_1m   <- floor_date(max(quote$timestamp), "1 minute")
+all_seconds_1m <- tibble(minute = seq(start_time_1m, end_time_1m, by = "1 min"))
+
+# count arrivals per second (including 0s)
+quotes_1m <- quote |>
+  mutate(minute = floor_date(timestamp, "1 minute ")) |>
+  group_by(minute)|>
+  summarise(arrival_rate_1m = n(), .groups = "drop") |>
+  right_join(all_seconds_1m, by = "minute") |>
+  replace_na(list(arrival_rate_1m = 0))
+
+desc_stats_1m <- quotes_1m|>
+  summarise(
+    Mean  = mean(arrival_rate_1m, na.rm = TRUE),
+    SD    = sd(arrival_rate_1m, na.rm = TRUE),
+    Min   = min(arrival_rate_1m, na.rm = TRUE),
+    `25%` = quantile(arrival_rate_1m, 0.25, na.rm = TRUE),
+    `50%` = median(arrival_rate_1m, na.rm = TRUE),
+    `75%` = quantile(arrival_rate_1m, 0.75, na.rm = TRUE),
+    Max   = max(arrival_rate_1m, na.rm = TRUE)
+  ) |>
+  t() |> as.data.frame()  
+
+colnames(desc_stats_1m) <- c("XBTUSD")  
+desc_stats_1m <- tibble::rownames_to_column(desc_stats_1m, "Statistic")
+
+```
+
+#### arrival 5 minute
+
+```{r}
+start_time_5m<- floor_date(min(quote$timestamp), "5 minute")
+end_time_5m   <- floor_date(max(quote$timestamp), "5 minute")
+all_seconds_5m <- tibble(minute = seq(start_time_5m, end_time_5m, by = "5 min"))
+
+# count arrivals per second (including 0s)
+ar_quotes_5m <- quote |>
+  mutate(minute = floor_date(timestamp, "5 minute ")) |>
+  group_by(minute)|>
+  summarise(arrival_rate_5m = n(), .groups = "drop") |>
+  right_join(all_seconds_5m, by = "minute") |>
+  replace_na(list(arrival_rate_5m = 0))
+
+desc_stats_5m<- ar_quotes_5m|>
+  summarise(
+    Mean  = mean(arrival_rate_5m, na.rm = TRUE),
+    SD    = sd(arrival_rate_5m, na.rm = TRUE),
+    Min   = min(arrival_rate_5m, na.rm = TRUE),
+    `25%` = quantile(arrival_rate_5m, 0.25, na.rm = TRUE),
+    `50%` = median(arrival_rate_5m, na.rm = TRUE),
+    `75%` = quantile(arrival_rate_5m, 0.75, na.rm = TRUE),
+    Max   = max(arrival_rate_5m, na.rm = TRUE)
+  ) |>
+  t() |> as.data.frame()  
+
+colnames(desc_stats_5m) <- c("XBTUSD")  
+desc_stats_5m <- tibble::rownames_to_column(desc_stats_5m, "Statistic")
+```
+
+#### Arrival 10min
+
+```{r}
+start_time_10m<- floor_date(min(quote$timestamp), "10 minute")
+end_time_10m   <- floor_date(max(quote$timestamp), "10 minute")
+all_seconds_10m <- tibble(minute = seq(start_time_10m, end_time_10m, by = "10 min"))
+
+# count arrivals per second (including 0s)
+ar_quotes_10m <- quote |>
+  mutate(minute = floor_date(timestamp, "10 minute ")) |>
+  group_by(minute)|>
+  summarise(arrival_rate_10m = n(), .groups = "drop") |>
+  right_join(all_seconds_10m, by = "minute") |>
+  replace_na(list(arrival_rate_10m = 0))
+
+desc_stats_10m <- ar_quotes_10m|>
+  summarise(
+    Mean  = mean(arrival_rate_10m, na.rm = TRUE),
+    SD    = sd(arrival_rate_10m, na.rm = TRUE),
+    Min   = min(arrival_rate_10m, na.rm = TRUE),
+    `25%` = quantile(arrival_rate_10m, 0.25, na.rm = TRUE),
+    `50%` = median(arrival_rate_10m, na.rm = TRUE),
+    `75%` = quantile(arrival_rate_10m, 0.75, na.rm = TRUE),
+    Max   = max(arrival_rate_10m, na.rm = TRUE)
+  ) |>
+  t() |> as.data.frame()  
+
+colnames(desc_stats_10m) <- c("XBTUSD")  
+desc_stats_10m <- tibble::rownames_to_column(desc_stats_10m, "Statistic")
+```
+
+#### Arrival 1 hour
+
+```{r}
+start_time_1h<- floor_date(min(quote$timestamp), "1 hour")
+end_time_1h   <- floor_date(max(quote$timestamp), "1 hour")
+all_seconds_1h <- tibble(hour = seq(start_time_1h, end_time_1h, by = "1 hour"))
+
+# count arrivals per second (including 0s)
+ar_quotes_1h <- quote |>
+  mutate(hour = floor_date(timestamp, "1 hour ")) |>
+  group_by(hour)|>
+  summarise(arrival_rate_1h= n(), .groups = "drop") |>
+  right_join(all_seconds_1h, by = "hour") |>
+  replace_na(list(arrival_rate_1h= 0))
+
+desc_stats_1h <- ar_quotes_1h|>
+  summarise(
+    Mean  = mean(arrival_rate_1h, na.rm = TRUE),
+    SD    = sd(arrival_rate_1h, na.rm = TRUE),
+    Min   = min(arrival_rate_1h, na.rm = TRUE),
+    `25%` = quantile(arrival_rate_1h, 0.25, na.rm = TRUE),
+    `50%` = median(arrival_rate_1h, na.rm = TRUE),
+    `75%` = quantile(arrival_rate_1h, 0.75, na.rm = TRUE),
+    Max   = max(arrival_rate_1h, na.rm = TRUE)
+  ) |>
+  t() |> as.data.frame()  
+
+colnames(desc_stats_1h) <- c("XBTUSD")  
+desc_stats_1h <- tibble::rownames_to_column(desc_stats_1h, "Statistic")
+```
+
+### OFI function
+
+```{r}
+compute_ofi <- function(quotes, dt) {
+  
+  q <- quotes |>
+    arrange(timestamp) |>
+    mutate(
+      mid_price = (bidPrice + askPrice) / 2,
+      mid_price_change = (mid_price - lag(mid_price)) / ticksize,
+      prev_bidPrice = lag(bidPrice),
+      prev_bidSize = lag(bidSize),
+      prev_askPrice = lag(askPrice),
+      prev_askSize = lag(askSize)
+    ) |>
+    drop_na()
+  
+  
+  q$OFI <- 0 
+  
+  bid_geq <- q$bidPrice >= q$prev_bidPrice
+  bid_leq <- q$bidPrice <= q$prev_bidPrice
+  ask_geq <- q$askPrice >= q$prev_askPrice
+  ask_leq <- q$askPrice <= q$prev_askPrice
+  
+  q$OFI[bid_geq] <- q$OFI[bid_geq] + q$bidSize[bid_geq]
+  q$OFI[bid_leq] <- q$OFI[bid_leq] - q$prev_bidSize[bid_leq]
+  q$OFI[ask_geq] <- q$OFI[ask_geq] + q$prev_askSize[ask_geq]
+  q$OFI[ask_leq] <- q$OFI[ask_leq] - q$askSize[ask_leq]
+
+  # Resample to dt (how often do I group my data)
+  q_res <- q |>
+    mutate(interval = floor_date(timestamp, unit = dt)) |>
+    group_by(interval) |>
+    summarise(
+      mid_price_change = sum(mid_price_change, na.rm = TRUE),
+      OFI = sum(OFI, na.rm = TRUE),
+      .groups = "drop"
+    )
+  
+  return(q_res)
+}
+```
+
+### TFI function
+
+```{r}
+compute_tfi <- function(trades, quotes, dt) {
+  
+  t <- trades |>
+    arrange(timestamp) |>
+    mutate(
+      sgn_size = ifelse(side == "Buy", Volume, -Volume),
+      interval = floor_date(timestamp, unit = dt)
+    ) |>
+    group_by(interval) |>
+    summarise(TFI = sum(sgn_size, na.rm = TRUE), .groups = "drop")
+  
+  q <- quotes |>
+    arrange(timestamp)|>
+    mutate(mid_price = (bidPrice + askPrice) / 2,
+           mid_price_change = (mid_price - lag(mid_price)) / ticksize,
+           interval = floor_date(timestamp, unit = dt)) |>
+    group_by(interval) |>
+    summarise(mid_price_change = sum((mid_price_change), na.rm = TRUE),
+              .groups = "drop")
+  
+  df <- left_join(t, q, by = "interval")
+  return(df)
+}
+
+```
+
+### stationarity test for non-diferenced ofi (table 2)
+
+```{r}
+ofi_10s <- compute_ofi(quote, "10 sec")
+adf_result <- adf.test(ofi_10s$OFI)
+#experimenting with lag 
+adf_ur <- ur.df(ofi_10s$OFI, type="drift", lags=0)  
+summary(adf_ur)
+
+```
+
+### fig 2 rep (10s update counts ACF)
+
+```{r}
+# Create 10-second intervals and count number of quote updates per interval
+quote_10s_counts <- quote |>
+  mutate(interval = floor_date(timestamp, unit = "10 seconds")) |>
+  group_by(interval) |>
+  summarise(update_count = n()) |>
+  arrange(interval)
+# Calculate ACF of update counts (exclude NAs if any)
+acf_result_uc10 <- acf(quote_10s_counts$update_count, plot = FALSE, lag.max = 9)
+# Convert ACF result to data frame for ggplot
+acf_df_uc10 <- with(acf_result_uc10, data.frame(lag = lag, acf = acf))
+max_lag_uc10<- max(acf_df_uc10$lag)
+#the confidence bands 
+# Sample size (number of intervals)
+n_uc10 <- nrow(quote_10s_counts)
+
+# 95% CI for ACF
+conf_limit <- qnorm(0.975) / sqrt(n_uc10)
+#attributes(acf_result_uc10)
+
+# Plot ACF
+ggplot(acf_df_uc10, aes(x = lag, y = acf)) +
+  geom_col(fill = "steelblue", width = 0.2) +
+  geom_hline(yintercept = conf_limit, linetype = "dashed", color = "red") +
+  geom_hline(yintercept = -conf_limit, linetype = "dashed", color = "red") +
+  labs(title = "ACF 10s update counts",
+       x = "Lag",
+       y = "Autocorrelation") +
+  scale_y_continuous(limits = c(-0.005, 1), breaks = seq(0, 1, by = 0.1)) +
+  scale_x_continuous(
+    breaks = seq(0, max_lag_uc10, by = 1),
+    expand = expansion(mult = c(0, 0.5))      # reduces extra padding
+  ) +
+    #breaks = seq(0, max_lag_uc10, by = 1)) +
+  theme_minimal()+
+  theme(
+    panel.grid.major.x = element_blank(),  
+    panel.grid.minor.x = element_blank()
+  )
+
+```
+
+### fig 3 10s OFI ACF
+
+```{r}
+#fig 3 rep
+# Compute OFI aggregated at 10-second intervals
+ofi_10s <- compute_ofi(quote, "10 sec")
+
+# Calculate ACF of OFI series
+acf_ofi <- acf(ofi_10s$OFI, plot = FALSE, lag.max = 9)
+
+
+acf_ofi_df <- with(acf_ofi, data.frame(lag = lag, acf = acf))
+max_lag_ofi<- max(acf_ofi_df$lag)
+conf3<- qnorm(0.975)/sqrt(nrow(ofi_10s))
+
+# Plot ACF
+ggplot(acf_ofi_df, aes(x = lag, y = acf)) +
+  geom_col( fill = "steelblue", width=0.2) +
+  geom_hline(yintercept = conf3, linetype = "dashed", color = "red") +
+  geom_hline(yintercept = -conf3, linetype = "dashed", color = "red") +
+  labs(title = "ACF 10s OFI ",
+       x = "Lag",
+       y = "Autocorrelation") +
+  scale_y_continuous(limits = c(-0.005, 1), breaks = seq(0, 1, by = 0.1)) +
+  scale_x_continuous(breaks = seq(0, max_lag_ofi, by = 1), 
+                      expand = expansion(mult = c(0, 0.5))) +
+  theme_minimal()+
+  theme(
+    panel.grid.major.x = element_blank(),  
+    panel.grid.minor.x = element_blank()
+  )
+
+
+```
+
+### fig 4 1s OFI vs price change
+
+```{r}
+ofi_1s <- compute_ofi(quote, "1 sec")
+ggplot(ofi_1s, aes(x = OFI, y = mid_price_change)) +
+  geom_point(alpha = 0.3, color = "darkgreen") +
+  labs(
+    title = "1s OFI vs Contemporaneous Price Change",
+    x = "OFI",
+    y = "Mid-price Change"
+  ) +
+  theme_minimal()
+
+
+```
+
+### fig 5 1 min OFI
+
+```{r}
+ofi_1min <- compute_ofi(quote, "1 min")
+
+
+ggplot(ofi_1min, aes(x = OFI, y = mid_price_change)) +
+  geom_point(alpha = 0.4, color = "darkgreen") +
+  labs(
+    title = "1-min OFI vs Contemporaneous Price Change",
+    x = "OFI",
+    y = "Mid-price Change"
+  ) +
+  theme_minimal()
+```
+
+### OLS for OFI
+
+#### 1s OFI
+
+```{r}
+lm_fit_OFI_1s <- lm(mid_price_change ~ OFI, data = ofi_1s)
+summary(lm_fit_OFI_1s)
+
+```
+
+#### 10s
+
+```{r}
+ofi_10sec <- compute_ofi(quote, "10 sec")
+lm_fit_OFI_10sec<- lm(mid_price_change~OFI, data = ofi_10sec)
+summary(lm_fit_OFI_10sec)
+```
+
+#### 1min OFI
+
+```{r}
+lm_fit_OFI_1min <- lm(mid_price_change ~ OFI, data = ofi_1min)
+summary(lm_fit_OFI_1min)
+
+```
+
+#### 5 min OFI
+
+```{r}
+ofi_5min <- compute_ofi(quote, "5 min")
+lm_fit_OFI_5min<- lm(mid_price_change~OFI, data = ofi_5min)
+summary(lm_fit_OFI_5min)
+```
+
+#### 10 min
+
+```{r}
+ofi_10min <- compute_ofi(quote, "10 min")
+lm_fit_OFI_10min<- lm(mid_price_change~OFI, data = ofi_10min)
+summary(lm_fit_OFI_10min)
+
+```
+
+#### 1 hour
+
+```{r}
+ofi_1hour <- compute_ofi(quote, "1 hour")
+lm_fit_OFI_1hour<- lm(mid_price_change~OFI, data = ofi_1hour)
+summary(lm_fit_OFI_1hour)
+```
+
+# Trade flow Imbalance
+
+### 10 SEC ACF TFI
+
+```{r}
+tfi_10s <- compute_tfi(trade, quote, "10 sec")
+
+acf_result <- acf(tfi_10s$TFI, lag.max = 9, plot = FALSE)
+acf_df <- with(acf_result, data.frame(lag = lag, acf = acf))
+
+max_lag <- max(acf_df$lag) 
+
+conf4<- qnorm(0.975)/sqrt(nrow(tfi_10s))
+
+
+ggplot(acf_df, aes(x = lag, y = acf)) +
+  geom_col( fill = "steelblue", width=0.2) +
+  geom_hline(yintercept = conf4, linetype = "dashed", color = "red") +
+  geom_hline(yintercept = -conf4, linetype = "dashed", color = "red") +
+  labs(title = "TFI 10second ACF",
+       x = "Lag",
+       y = "Autocorrelation") +
+  scale_y_continuous(limits = c(-0.05, 1), breaks = seq(0, 1, by = 0.1)) +
+  scale_x_continuous(breaks = seq(0, max_lag, by = 1),
+  expand = expansion(mult = c(0, 0.5))) +
+  theme_minimal()+
+theme(
+    panel.grid.major.x = element_blank(),  
+    panel.grid.minor.x = element_blank()
+  )
+
+```
+
+#### scatter 1min tfi vs price change
+
+```{r}
+tfi_1min <- compute_tfi(trades = trade, quotes = quote, dt = "1 min")
+ggplot(tfi_1min, aes(x = TFI, y = mid_price_change)) +
+  geom_point(alpha = 0.3, color = "steelblue") + 
+  labs(
+   title ="1-min TFI vs Contemporaneous Price",
+    x = "TFI",
+    y = "Mid-price Change"
+  ) +
+  scale_y_continuous(breaks = seq(-1250, 750, 250))+
+  theme_minimal()
+
+```
+
+#### OLS for tfi
+
+#### ols 1 second
+
+```{r}
+tfi_1s <- compute_tfi(trade, quote, "1 sec")
+lm_fit_tfi_1sec <- lm(mid_price_change ~ TFI, data = tfi_1s)
+summary(lm_fit_tfi_1sec )
+```
+
+#### ols 10 second
+
+```{r}
+tfi_10s <- compute_tfi(trade, quote, "10 sec")
+lm_fit_tfi_10sec <- lm(mid_price_change ~ TFI, data = tfi_10s)
+summary(lm_fit_tfi_10sec )
+```
+
+#### OLS 1min
+
+```{r}
+lm_fit_tfi_1min <- lm(mid_price_change ~ TFI, data = tfi_1min)
+summary(lm_fit_tfi_1min )
+
+```
+
+#### OLS 5 min
+
+```{r}
+tfi_5min <- compute_tfi(trade, quote, "5 min")
+lm_fit_tfi_5min <- lm(mid_price_change ~ TFI, data = tfi_5min)
+summary(lm_fit_tfi_5min )
+```
+
+#### OLS 10min
+
+```{r}
+tfi_10min <- compute_tfi(trade, quote, "10 min")
+lm_fit_tfi_10min <- lm(mid_price_change ~ TFI, data = tfi_10min)
+summary(lm_fit_tfi_10min )
+```
+
+#### OLS 1 hour
+
+```{r}
+tfi_1hour <- compute_tfi(trade, quote, "1 hour")
+lm_fit_tfi_1hour <- lm(mid_price_change ~ TFI, data = tfi_1hour)
+summary(lm_fit_tfi_1hour )
+```
+
+#### stationary test TFI
+
+```{r}
+adf_result_tfi_1s <- adf.test(tfi_1s$TFI)
+adf_result_tfi_1s
+```
+
+```{r}
+kpss_result_tfi_1s <- kpss.test(tfi_1s$TFI)
+kpss_result_tfi_1s
+```
+
+```{r}
+
+adf_result_tfi_10s <- adf.test(tfi_10s$TFI)
+adf_result_tfi_10s
+```
+
+```{r}
+kpss_result_tfi_10s <- kpss.test(tfi_10s$TFI)
+kpss_result_tfi_10s
+```
+
+```{r}
+adf_result_tfi_1min <- adf.test(tfi_1min$TFI)
+adf_result_tfi_1min
+```
+
+```{r}
+kpss_result_tfi_1min <- kpss.test(tfi_1min$TFI)
+kpss_result_tfi_1min
+```
+
+```{r}
+adf_result_tfi_5min <- adf.test(tfi_5min$TFI)
+adf_result_tfi_5min 
+```
+
+```{r}
+kpss_result_tfi_5min <- kpss.test(tfi_5min$TFI)
+kpss_result_tfi_5min 
+```
+
+```{r}
+adf_result_tfi_10min <- adf.test(tfi_10min$TFI)
+adf_result_tfi_10min
+```
+
+```{r}
+kpss_result_tfi_10min <- kpss.test(tfi_10min$TFI)
+kpss_result_tfi_10min
+```
+
+```{r}
+adf_result_tfi_1hour <- adf.test(tfi_1hour$TFI)
+adf_result_tfi_1hour
+```
+
+```{r}
+kpss_result_tfi_1hour <- kpss.test(tfi_1hour$TFI)
+kpss_result_tfi_1hour
+```
+
+# Appendix graphs
+
+#### OFI_10sec vs price change
+
+```{r}
+
+ggplot(ofi_10sec, aes(x = OFI, y = mid_price_change)) +
+  geom_point(alpha = 0.4, color = "steelblue") +
+  labs(
+    title = "10-sec OFI vs Contemporaneous Price Change",
+    x = "OFI",
+    y = "Mid-price Change"
+  ) +
+  theme_minimal()
+```
+
+#### OFI_5min
+
+```{r}
+
+ggplot(ofi_5min, aes(x = OFI, y = mid_price_change)) +
+  geom_point(alpha = 0.4, color = "steelblue") +
+  labs(
+    title = "5-min OFI vs Contemporaneous Price Change",
+    x = "OFI",
+    y = "Mid-price Change"
+  ) +
+  theme_minimal()
+```
+
+#### OFI_10mins
+
+```{r}
+
+ggplot(ofi_10min, aes(x = OFI, y = mid_price_change)) +
+  geom_point(alpha = 0.4, color = "steelblue") +
+  labs(
+    title = "10-min OFI vs Contemporaneous Price Change",
+    x = "OFI",
+    y = "Mid-price Change"
+  ) +
+  theme_minimal()
+```
+
+#### OFI_1hour
+
+```{r}
+
+
+
+ggplot(ofi_1hour, aes(x = OFI, y = mid_price_change)) +
+  geom_point(alpha = 0.4, color = "steelblue") +
+  labs(
+    title = "1-hour OFI vs Contemporaneous Price Change",
+    x = "OFI",
+    y = "Mid-price Change"
+  ) +
+  theme_minimal()
+```
+
+#### tfi_10sec
+
+```{r}
+
+ggplot(tfi_10s, aes(x = TFI, y = mid_price_change)) +
+  geom_point(alpha = 0.3, color = "steelblue") + 
+  labs(
+   title ="10-sec TFI vs contemporaneous Price change",
+    x = "TFI",
+    y = "Mid-price Change"
+  ) +
+  scale_y_continuous(breaks = seq(-1250, 750, 250))+
+  theme_minimal()
+```
+
+#### TFI_5min
+
+```{r}
+ggplot(tfi_5min, aes(x = TFI, y = mid_price_change)) +
+  geom_point(alpha = 0.3, color = "steelblue") + 
+  labs(
+   title ="5-min TFI vs Contemporaneous Price Change",
+    x = "TFI",
+    y = "Mid-price Change"
+  ) +
+  scale_y_continuous(breaks = seq(-1250, 750, 250))+
+  theme_minimal()
+```
+
+#### tfi_10mins
+
+```{r}
+
+ggplot(tfi_10min, aes(x = TFI, y = mid_price_change)) +
+  geom_point(alpha = 0.3, color = "steelblue") + 
+  labs(
+   title ="10-min TFI vs Contemporaneous Price Change",
+    x = "TFI",
+    y = "Mid-price Change"
+  ) +
+  #scale_y_continuous(breaks = seq(-1250, 750, 250))+
+  theme_minimal()
+```
+
+#### tfi_1hour
+
+```{r}
+
+ggplot(tfi_1hour, aes(x = TFI, y = mid_price_change)) +
+  geom_point(alpha = 0.3, color = "steelblue") + 
+  labs(
+   title ="1-hour TFI vs Contemporaneous Price Change",
+    x = "TFI",
+    y = "Mid-price Change"
+  ) +
+  #scale_y_continuous(breaks = seq(-1250, 750, 250))+
+  theme_minimal()
+```
+
+#### tfi_1 sec
+
+```{r}
+ggplot(tfi_1s, aes(x = TFI, y = mid_price_change)) +
+  geom_point(alpha = 0.3, color = "steelblue") + 
+  labs(
+   title ="1-sec TFI vs Contemporaneous Price Change",
+    x = "TFI",
+    y = "Mid-price Change"
+  ) +
+  #scale_y_continuous(breaks = seq(-1250, 750, 250))+
+  theme_minimal()
+```
+
+```         
+```
