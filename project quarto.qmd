@@ -25,20 +25,15 @@ trade <- read.csv("XBTUSD_trade_data_oct.csv")
 quote<- read.csv("XBTUSD_quote_data_oct.csv")
 ```
 
-4.1m observations, 4 variables for Trade data. 8.57 m obs and 5 variables for Quote data.
+
 
 ```{r}
 #| echo: false
 quote$timestamp <- as.POSIXct(sub("D", " ", quote$timestamp), format="%Y-%m-%d %H:%M:%OS", tz="UTC")
-options(digits.secs = 6) #  just helps you see the precision — it's  just for display but the doesnt chnage how the data is stored but anyways internally the microseconds are there 
-head(quote$timestamp)
+options(digits.secs = 6)
 trade$timestamp <- as.POSIXct(sub("D", " ", trade$timestamp), format="%Y-%m-%d %H:%M:%OS", tz="UTC")
 options(digits.secs = 6) 
-head(trade$timestamp)
-
 ```
-
-## Stats results
 
 ### quote midprice and change in midprice computation
 
@@ -55,7 +50,6 @@ quote$dMP_dollars <- (quote$MP - lag(quote$MP))
 quote_15<- quote|> filter(as.Date(timestamp)==as.Date("2017-10-15"))
 ```
 
-When we filter for Oct 15 we end up with 410817 observations of 8 variables
 
 ### price stationarity tests
 
@@ -71,9 +65,7 @@ quote_15$volatility_dollars <- rollapply(
 
 ```
 
-for every 1000 consecutive ticks, it calculates the standard deviation, which measures how much the price changes fluctuate within that window.
 
-#### price plots without division by ticksize (gives correct output though)
 
 ```{r}
 p1 <- ggplot(quote_15, aes(x = timestamp, y = MP, color = "MidPrice")) +
@@ -117,59 +109,13 @@ p3_dollars <- ggplot(quote_15, aes(x = timestamp, y = volatility_dollars, color 
 ggsave("stackedpriceplots.png", p1 / p2_dollars / p3_dollars, width = 8, height = 6)
 ```
 
-#### price plots with ticksize division
 
-```{r}
-p1 <- ggplot(quote_15, aes(x = timestamp, y = MP, color = "MidPrice")) +
-  geom_line() +
-  labs(x = "", y = "", color = "") +
-  scale_color_manual(values = c("MidPrice" = "steelblue")) +
-  theme_minimal() +
-  theme(
-    legend.position = c(0.98, 0.95),
-    legend.justification = c("right", "top"),
-    legend.key.size = unit(0.4, "lines"),
-    legend.text = element_text(size = 7)
-  )
-
-p2_tick <- ggplot(quote_15, aes(x = timestamp, y = dMP, color = "ΔMP")) +
-  geom_line() +
-  labs(x = "", y = "", color = "") +
-  scale_color_manual(values = c("ΔMP" = "darkred")) +
-  theme_minimal() +
-  theme(
-    legend.position = c(0.98, 0.95),
-    legend.justification = c("right", "top"),
-    legend.key.size = unit(0.4, "lines"),
-    legend.text = element_text(size = 7)
-  )
-
-
-p3_tick <- ggplot(quote_15, aes(x = timestamp, y = volatility, color = "Volatility")) +
-  geom_line() +
-  labs(x = "Time", y = "", color = "") +
-  scale_color_manual(values = c("Volatility" = "darkgreen")) +
-  theme_minimal() +
-  theme(
-    legend.position = c(0.98, 0.95),
-    legend.justification = c("right", "top"),
-    legend.key.size = unit(0.4, "lines"),
-    legend.text = element_text(size = 7)
-  )
-
-#(p1 / p2_dollars / p3_dollars) + plot_layout(heights = c(2, 1.5, 1.5))
-ggsave("stackedpriceplots_tick.png", p1 / p2_tick / p3_tick, width = 8, height = 6)
-```
-
-Fig 1 was basically to give a full picture of the price behaviour of crypto; overall trends, non-stationarity from the 1st plot of the midprice; stationarity and short term movements from the 2nd plot of differenced midprice; 3rd plot with the rolling volaitlity showing how extreme the movements in price changes are over a short period (1000 ticks)
-
-#### stationarity test for the differenced price series (all ks)
 
 ```{r}
 
 intervals <- c("1 second", "10 seconds", "1 minute", "5 minutes", "10 minutes", "1 hour")
 
-# Function to test stationarity across multiple intervals
+
 test_stationarity_all <- function(data, intervals) {
   results <- data.frame(
     interval = character(),
@@ -473,7 +419,7 @@ compute_tfi <- function(trades, quotes, dt) {
 
 ```
 
-### stationarity test for non-diferenced ofi (table 2)
+### stationarity test for non-diferenced ofi 
 
 ```{r}
 ofi_10s <- compute_ofi(quote, "10 sec")
@@ -517,9 +463,8 @@ ggplot(acf_df_uc10, aes(x = lag, y = acf)) +
   scale_y_continuous(limits = c(-0.005, 1), breaks = seq(0, 1, by = 0.1)) +
   scale_x_continuous(
     breaks = seq(0, max_lag_uc10, by = 1),
-    expand = expansion(mult = c(0, 0.5))      # reduces extra padding
+    expand = expansion(mult = c(0, 0.5))     
   ) +
-    #breaks = seq(0, max_lag_uc10, by = 1)) +
   theme_minimal()+
   theme(
     panel.grid.major.x = element_blank(),  
@@ -531,7 +476,6 @@ ggplot(acf_df_uc10, aes(x = lag, y = acf)) +
 ### fig 3 10s OFI ACF
 
 ```{r}
-#fig 3 rep
 # Compute OFI aggregated at 10-second intervals
 ofi_10s <- compute_ofi(quote, "10 sec")
 
@@ -563,7 +507,7 @@ ggplot(acf_ofi_df, aes(x = lag, y = acf)) +
 
 ```
 
-### fig 4 1s OFI vs price change
+
 
 ```{r}
 ofi_1s <- compute_ofi(quote, "1 sec")
@@ -579,7 +523,7 @@ ggplot(ofi_1s, aes(x = OFI, y = mid_price_change)) +
 
 ```
 
-### fig 5 1 min OFI
+
 
 ```{r}
 ofi_1min <- compute_ofi(quote, "1 min")
@@ -943,3 +887,4 @@ ggplot(tfi_1s, aes(x = TFI, y = mid_price_change)) +
 
 ```         
 ```
+
